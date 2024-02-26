@@ -3,9 +3,12 @@ use std::io::BufRead;
 use std::io::{Write, BufReader, BufWriter};
 use std::net::TcpStream;
 use url::Url;
+use std::collections::HashMap;
 use std::process;
 
 fn main() {
+    const USER_AGENT: &str = "my-rtsp-client";
+
     let args: Vec<String> = env::args().collect();
 
     if args.len() < 2 {
@@ -40,12 +43,17 @@ fn main() {
 
     println!("connected to rtsp server {}:{}", host, port);
     // send OPTIONS
-    let c_seq = 1;
+    let mut c_seq = 1;
     let mut request = String::new();
-    request += "OPTIONS rtsp://192.168.1.39:554/stream1 RTSP/1.0\r\n";
-    request += &format!("CSeq: {}\r\n", c_seq);
-    request+= "User-Agent: my-rtsp-client\r\n";
+    request += &format!("OPTIONS {} RTSP/1.0\r\n", rtsp_url);
+    let mut req_headers: HashMap<String, String> = HashMap::new();
+    req_headers.insert("CSeq".to_string(), c_seq.to_string());
+    req_headers.insert("User-Agent".to_string(), USER_AGENT.to_string());
+    for (key, value) in &req_headers {
+        request += &format!("{}: {}\r\n", key, value);
+    }
     request+= "\r\n";
+
     if let Err(e) = writer.write_all(request.as_bytes()) {
         eprintln!("failed to send OPTION request: {}", e);
         process::exit(1);
@@ -75,5 +83,19 @@ fn main() {
     for line in &lines {
         println!("{}", line);
     }
+
+    c_seq += 1;
+    let mut request = String::new();
+    request += &format!("DESCRIBE {} RTSP/1.0", rtsp_url);
+
+    let mut req_headers: HashMap<String, String> = HashMap::new();
+    req_headers.insert("CSeq".to_string(), c_seq.to_string());
+    req_headers.insert("User-Agent".to_string(), USER_AGENT.to_string());
+    //req_headers.insert("Authorization".to_string(), USER_AGENT.to_string());
+    for (key, value) in &req_headers {
+        request += &format!("{}: {}\r\n", key, value);
+    }
+    request+= "\r\n";
+
     stream.shutdown(std::net::Shutdown::Both).unwrap();
 }
