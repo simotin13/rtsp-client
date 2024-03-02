@@ -1,3 +1,4 @@
+extern crate base64;
 use std::env;
 use std::io::BufRead;
 use std::io::{Write, BufReader, BufWriter};
@@ -18,6 +19,29 @@ fn main() {
 
     let rtsp_url = &args[1];
 
+    // check if url starts with rtsp:// or rtspt://
+    if !rtsp_url.starts_with("rtsp://") && !rtsp_url.starts_with("rtspt://") {
+        eprintln!("rtsp_url does not start with rtsp:// or rtspt://");
+        std::process::exit(1);
+    }
+
+    let tmp = rtsp_url.split("://").collect::<Vec<&str>>()[1];
+    if !tmp.contains("@") {
+        eprintln!("rtsp_url does not contain @");
+        std::process::exit(1);
+    }
+    let tmp = tmp.split("@").collect::<Vec<&str>>()[0];
+    // check if url contains :
+    if !tmp.contains(":") {
+        eprintln!("rtsp_url does not contain : for username:password");
+        std::process::exit(1);
+    }
+
+    // get username and password
+    let username = tmp.split(":").collect::<Vec<&str>>()[0];
+    let password = tmp.split(":").collect::<Vec<&str>>()[1];
+
+    // get url,port
     let url = match Url::parse(rtsp_url) {
         Ok(url) => url,
         Err(_) => {
@@ -91,7 +115,9 @@ fn main() {
     let mut req_headers: HashMap<String, String> = HashMap::new();
     req_headers.insert("CSeq".to_string(), c_seq.to_string());
     req_headers.insert("User-Agent".to_string(), USER_AGENT.to_string());
-    //req_headers.insert("Authorization".to_string(), USER_AGENT.to_string());
+    // basic authentication
+    let auth = base64::encode(&format!("{}:{}", username, password));
+    req_headers.insert("Authorization".to_string(), format!("Basic {}", auth));
     for (key, value) in &req_headers {
         request += &format!("{}: {}\r\n", key, value);
     }
