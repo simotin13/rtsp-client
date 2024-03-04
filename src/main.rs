@@ -123,7 +123,7 @@ fn main() {
     }
     request+= "\r\n";
     if let Err(e) = writer.write_all(request.as_bytes()) {
-        eprintln!("failed to send OPTION request: {}", e);
+        eprintln!("failed to send DESCRIBE request: {}", e);
         process::exit(1);
     }
     let _ = writer.flush();
@@ -166,7 +166,7 @@ fn main() {
     }
     request+= "\r\n";
     if let Err(e) = writer.write_all(request.as_bytes()) {
-        eprintln!("failed to send OPTION request: {}", e);
+        eprintln!("failed to send SETUP request: {}", e);
         process::exit(1);
     }
     let _ = writer.flush();
@@ -213,7 +213,7 @@ fn main() {
     req_headers.insert("User-Agent".to_string(), USER_AGENT.to_string());
     let auth = base64::encode(&format!("{}:{}", username, password));
     req_headers.insert("Authorization".to_string(), format!("Basic {}", auth));
-    req_headers.insert("Session".to_string(), session);
+    req_headers.insert("Session".to_string(), session.clone());
 
     // TODO: port number should be dynamic
     req_headers.insert("Transport".to_string(), "RTP/AVP;unicast;client_port=56648-56649".to_string());
@@ -222,12 +222,57 @@ fn main() {
     }
     request+= "\r\n";
     if let Err(e) = writer.write_all(request.as_bytes()) {
-        eprintln!("failed to send OPTION request: {}", e);
+        eprintln!("failed to send SETUP request: {}", e);
         process::exit(1);
     }
     let _ = writer.flush();
 
     let lines:Vec<String> = Vec::new();
+    loop {
+        let mut line = String::new();
+        match reader.read_line(&mut line) {
+            Ok(len) => {
+                println!("line[{}]", line.trim_end_matches("\r\n").to_string());
+                if len == 0 {
+                    break;
+                }
+                if line == "\r\n" {
+                    break;
+                }
+            },
+            Err(e) => {
+                eprintln!("failed to read_line {}", e);
+                break;
+            }
+        }
+    }
+    for line in &lines {
+        println!("{}", line);
+    }
+
+    // ====================================================
+    // PLAY
+    // ====================================================
+    c_seq += 1;
+    let mut request = String::new();
+    request += &format!("PLAY {} RTSP/1.0\r\n", rtsp_url);
+    let mut req_headers: HashMap<String, String> = HashMap::new();
+    req_headers.insert("CSeq".to_string(), c_seq.to_string());
+    req_headers.insert("User-Agent".to_string(), USER_AGENT.to_string());
+    let auth = base64::encode(&format!("{}:{}", username, password));
+    req_headers.insert("Authorization".to_string(), format!("Basic {}", auth));
+    req_headers.insert("Session".to_string(), session);
+    req_headers.insert("Range".to_string(), "npt=0.000-".to_string());
+    for (key, value) in &req_headers {
+        request += &format!("{}: {}\r\n", key, value);
+    }
+    request+= "\r\n";
+    if let Err(e) = writer.write_all(request.as_bytes()) {
+        eprintln!("failed to send Play request: {}", e);
+        process::exit(1);
+    }
+    let _ = writer.flush();
+
     loop {
         let mut line = String::new();
         match reader.read_line(&mut line) {
