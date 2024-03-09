@@ -8,3 +8,4 @@ edition = "2021"
 [dependencies]
 url = "2.2.2"
 base64 = "0.13.0"
+ctrlc = "3.3.0"

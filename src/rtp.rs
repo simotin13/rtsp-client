@@ -62,7 +62,7 @@ impl RTPReceiver {
 
     pub fn new(port: u16) -> RTPReceiver {
         println!("RTPReceiver::new({})", port);
-        let socket = UdpSocket::bind(format!("127.0.0.1:{}", port)).unwrap();
+        let socket = UdpSocket::bind(format!("0.0.0.0:{}", port)).unwrap();
         RTPReceiver {
             socket,
         }
