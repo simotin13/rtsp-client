@@ -9,6 +9,10 @@ use std::collections::HashMap;
 pub struct RTSPClient {
     user_agent: &'static str,
     rtsp_url: String,
+    host: String,
+    port: u16,
+    server_port: u16,
+    client_port: u16,
     username: String,
     password: String,
     c_seq: u32,
@@ -17,7 +21,7 @@ pub struct RTSPClient {
 }
 
 impl RTSPClient {
-    pub fn new(rtsp_url: String) -> Result<RTSPClient, String> {
+    pub fn new(rtsp_url: String, client_port: u16) -> Result<RTSPClient, String> {
         // check if url starts with rtsp:// or rtspt://
         if !rtsp_url.starts_with("rtsp://") && !rtsp_url.starts_with("rtspt://") {
             return Err("URL must start with rtsp:// or rtspt://".to_string());
@@ -62,6 +66,10 @@ impl RTSPClient {
         Ok(RTSPClient {
             user_agent: "my-rtsp-client",
             rtsp_url: rtsp_url.to_string(),
+            host: host.to_string(),
+            port: port,
+            server_port: 0,
+            client_port: client_port,
             username: username.to_string(),
             password: password.to_string(),
             session: String::new(),
@@ -166,8 +174,10 @@ impl RTSPClient {
         req_headers.insert("User-Agent".to_string(), self.user_agent.to_string());
         let auth = base64::encode(&format!("{}:{}", self.username, self.password));
         req_headers.insert("Authorization".to_string(), format!("Basic {}", auth));
+
         // TODO: port number should be dynamic
-        req_headers.insert("Transport".to_string(), "RTP/AVP;unicast;client_port=56648-56649".to_string());
+        let transport = format!("RTP/AVP;unicast;client_port={}-{}", self.client_port, self.client_port+1);
+        req_headers.insert("Transport".to_string(), transport);
         for (key, value) in &req_headers {
             request += &format!("{}: {}\r\n", key, value);
         }
@@ -194,6 +204,18 @@ impl RTSPClient {
                             let session = tmp.split(";").collect::<Vec<&str>>()[0].to_string();
                             self.session = session;
                             println!("session:{}", self.session);
+                        }
+
+                        if pair[0].trim() == "Transport" {
+                            let tmp = pair[1].trim().to_string();
+                            let pair = tmp.split(";").collect::<Vec<&str>>();
+                            for p in pair {
+                                if p.contains("server_port") {
+                                    let tmp = p.split("=").collect::<Vec<&str>>()[1];
+                                    let server_port = tmp.split("-").collect::<Vec<&str>>()[0].parse::<u16>().unwrap();
+                                    self.server_port = server_port;
+                                }
+                            }
                         }
                     }
             
@@ -225,7 +247,8 @@ impl RTSPClient {
         req_headers.insert("Session".to_string(), self.session.clone());
     
         // TODO: port number should be dynamic
-        req_headers.insert("Transport".to_string(), "RTP/AVP;unicast;client_port=56648-56649".to_string());
+        let transport = format!("RTP/AVP;unicast;client_port={}-{}", self.client_port, self.client_port+1);
+        req_headers.insert("Transport".to_string(), transport);
         for (key, value) in &req_headers {
             request += &format!("{}: {}\r\n", key, value);
         }
@@ -304,5 +327,21 @@ impl RTSPClient {
 
     pub fn shutdown(&mut self) {
         self.stream.shutdown(std::net::Shutdown::Both).unwrap();
+    }
+
+    pub fn get_host(&self) -> String {
+        self.host.clone()
+    }
+
+    pub fn get_port(&self) -> u16 {
+        self.port
+    }
+
+    pub fn get_server_port(&self) -> u16 {
+        self.server_port
+    }
+
+    pub fn get_client_port(&self) -> u16 {
+        self.client_port
     }
 }
