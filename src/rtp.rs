@@ -1,8 +1,17 @@
 use std::net::{UdpSocket};
-const NAL_TYPE_SEI: u8 = 6;
-const NAL_TYPE_SPS: u8 = 7;
-const NAL_TYPE_PPS: u8 = 8;
-const NAL_TYPE_AUD: u8 = 9;
+pub const NAL_UNIT_TYPE_NON_IDR: u8 = 1;
+pub const NAL_UNIT_TYPE_PARTITION_A: u8 = 2;
+pub const NAL_UNIT_TYPE_PARTITION_B: u8 = 3;
+pub const NAL_UNIT_TYPE_PARTITION_C: u8 = 4;
+pub const NAL_UNIT_TYPE_IDR: u8 = 5;                // Instant Decoder Refresh
+pub const NAL_UNIT_TYPE_SEI: u8 = 6;
+pub const NAL_UNIT_TYPE_SPS: u8 = 7;
+pub const NAL_UNIT_TYPE_PPS: u8 = 8;
+pub const NAL_UNIT_TYPE_AUD: u8 = 9;
+pub const NAL_UNIT_TYPE_END_OF_SEQUENCE: u8 = 10;
+pub const NAL_UNIT_TYPE_END_OF_STREAM: u8 = 11;
+pub const NAL_UNIT_TYPE_FILLER_DATA: u8 = 12;
+pub const NAL_UNIT_TYPE_SPS_EXT: u8 = 13;
 
 /*
 struct NALUnit {
