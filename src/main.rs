@@ -59,12 +59,20 @@ fn main() {
     rtsp_client.play().expect("failed to send PLAY request");
 
     // receive RTP
-    let mut rtp_receiver = rtp::RTPReceiver::new(rtsp_client.get_client_port());
-    let mut fragment_buffer = Vec::new();
+    let rtp_receiver = rtp::RTPReceiver::new(rtsp_client.get_client_port());
+    let mut payload_with_start_code : Vec<u8> = Vec::new();
+    let mut fragment_buffer : Vec<u8> = Vec::new();
+
     while running.load(Ordering::SeqCst) {
         let (header, payload) = rtp_receiver.receive();
         println!("RTP Header: {:?}", header);
-        
+
+        // make payload with start code for openH264 decoder
+        payload_with_start_code.push(0x00);
+        payload_with_start_code.push(0x00);
+        payload_with_start_code.push(0x01);
+        payload_with_start_code.extend(payload.clone());
+
         // check NAL header
         let nal_header = payload[0];
 
@@ -96,24 +104,24 @@ fn main() {
             },
             rtp::NAL_UNIT_TYPE_IDR => {
                 println!("RTP NAL Type IDR: {}", nal_unit_type);
+                let idr = decoder.decode(&payload_with_start_code);
+                match idr {
+                    Ok(idr) => {
+                        // TODO
+                    },
+                    Err(e) => {
+                        eprintln!("******** failed to decode: {}", e);
+                        // stop process
+                        break;
+                    }
+                }
             },
             rtp::NAL_UNIT_TYPE_SEI => {
                 println!("RTP NAL Type SEI: {}", nal_unit_type);
             },
             rtp::NAL_UNIT_TYPE_SPS => {
                 println!("RTP NAL Type SPS: {}", nal_unit_type);
-                // decode SPS
-                //h264::parse_sps(&payload);
-                // show payload size
-                println!("RTP SPS Payload Size: {}", payload.len());
-
-                // add start code at the beginning of the payload
-                let mut tmp = payload.clone();
-                tmp.insert(0, 0x01);
-                tmp.insert(0, 0x00);
-                tmp.insert(0, 0x00);
-                println!("RTP SPS Payload Size with Start Code: {}", tmp.len());
-                let sps = decoder.decode(&tmp);
+                let sps = decoder.decode(&payload_with_start_code);
                 match sps {
                     Ok(sps) => {
                         println!("******** SPS: {:?}", sps);
@@ -128,7 +136,7 @@ fn main() {
             rtp::NAL_UNIT_TYPE_PPS => {
                 println!("RTP NAL Type PPS: {}", nal_unit_type);
                 // decode PPS
-                let pps = decoder.decode(&payload);
+                let pps = decoder.decode(&payload_with_start_code);
                 match pps {
                     Ok(pps) => {
                         println!("******** PPS: {:?}", pps);
@@ -167,17 +175,20 @@ fn main() {
                 println!("RTP FU Start Bit: {}, End bit:{}, Reserved Bit:{}, FU nal_unit_type:{}", start_bit, end_bit, reserved, fu_nal_unit_type);
                 if start_bit == 1 {
                     fragment_buffer.clear();
+                    // set start code for decode
+                    fragment_buffer.push(0x00);
+                    fragment_buffer.push(0x00);
+                    fragment_buffer.push(0x01);
+                    let mut fu_nal_header = nal_header & 0xE0;
+                    fu_nal_header |= fu_nal_unit_type;
+                    fragment_buffer.push(fu_nal_header);
                 }
                 fragment_buffer.extend_from_slice(&payload[2..]);
                 if end_bit == 1 {
-                    // add nal header at the beginning of the fragment_buffer
-                    let mut fu_nal_header = nal_header & 0xE0;
-                    fu_nal_header |= fu_nal_unit_type;
-                    fragment_buffer.insert(0, fu_nal_header);
                     let yuv = decoder.decode(&fragment_buffer);
                     match yuv {
                         Ok(yuv) => {
-                            println!("******** YUV: {:?}", yuv);
+                            // TODO
                         },
                         Err(e) => {
                             eprintln!("******** failed to decode: {}", e);
