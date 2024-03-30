@@ -6,6 +6,8 @@ use std::env;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use openh264::decoder::Decoder;
+use std::fs::OpenOptions;
+use std::io::Write;
 
 extern crate ctrlc;
 
@@ -62,12 +64,21 @@ fn main() {
     let mut payload_with_start_code : Vec<u8> = Vec::new();
     let mut fragment_buffer : Vec<u8> = Vec::new();
 
+    let file_path = "sample.mp4";
+    let mut file_mp4 = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(file_path)
+        .expect("Failed to open file");
+
     while running.load(Ordering::SeqCst) {
         println!("main loop running...");
 
         println!("before receive...");
         let (header, payload) = rtp_receiver.receive();
         println!("RTP Header: {:?}", header);
+
+       file_mp4.write_all(&payload).expect("Failed to write to file");
 
         // make payload with start code for openH264 decoder
         payload_with_start_code.push(0x00);
@@ -225,6 +236,8 @@ fn main() {
             }
         }
     }
+
+    drop(file_mp4);
 
     println!("stop receiving...");
     rtsp_client.shutdown();
