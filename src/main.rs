@@ -26,15 +26,7 @@ fn main() {
         }
     };
 
-    let running = Arc::new(AtomicBool::new(true));
-    let r = running.clone();
-    ctrlc::set_handler(move || {
-        println!("stop requested...");
-        r.store(false, Ordering::SeqCst);
-    }).expect("Error setting Ctrl+C handler");
-
     let rtsp_url = &args[1];
-
     let mut rtsp_client = match rtsp_client::RTSPClient::new(rtsp_url.to_string(), 56789) {
         Ok(c) => c,
         Err(e) => {
@@ -42,6 +34,13 @@ fn main() {
             process::exit(1);
         }
     };
+
+    let running = Arc::new(AtomicBool::new(true));
+    let r = running.clone();
+    ctrlc::set_handler(move || {
+        println!("stop requested...");
+        r.store(false, Ordering::SeqCst);
+    }).expect("Error setting Ctrl+C handler");
 
     // OPTIONS
     rtsp_client.options().expect("failed to send OPTIONS request");
@@ -64,6 +63,9 @@ fn main() {
     let mut fragment_buffer : Vec<u8> = Vec::new();
 
     while running.load(Ordering::SeqCst) {
+        println!("main loop running...");
+
+        println!("before receive...");
         let (header, payload) = rtp_receiver.receive();
         println!("RTP Header: {:?}", header);
 
