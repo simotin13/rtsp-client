@@ -175,7 +175,6 @@ impl RTSPClient {
         let auth = base64::encode(&format!("{}:{}", self.username, self.password));
         req_headers.insert("Authorization".to_string(), format!("Basic {}", auth));
 
-        // TODO: port number should be dynamic
         let transport = format!("RTP/AVP;unicast;client_port={}-{}", self.client_port, self.client_port+1);
         req_headers.insert("Transport".to_string(), transport);
         for (key, value) in &req_headers {

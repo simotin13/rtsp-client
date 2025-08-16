@@ -1,4 +1,6 @@
 use std::net::{UdpSocket};
+use std::time::Duration;
+use std::io;
 pub const NAL_UNIT_TYPE_NON_IDR: u8 = 1;
 pub const NAL_UNIT_TYPE_PARTITION_A: u8 = 2;
 pub const NAL_UNIT_TYPE_PARTITION_B: u8 = 3;
@@ -34,7 +36,8 @@ pub struct RTPHeader {
 }
 
 pub struct RTPReceiver {
-    socket: UdpSocket,
+    rtp_socket: UdpSocket,
+    rtcp_socket: UdpSocket,
 }
 
 impl RTPReceiver {
@@ -61,19 +64,41 @@ impl RTPReceiver {
         }
     }
 
-    pub fn receive(&self) -> (RTPHeader, Vec<u8>) {
+    pub fn receive(&self) -> Result<(RTPHeader, Vec<u8>), io::Error> {
         let mut buffer = [0; 1500];
-        let (size, _) = self.socket.recv_from(&mut buffer).unwrap();
-        let header = self.parse_rtp_header(&buffer);
-        let payload = buffer[12..size].to_vec();
-        (header, payload)
-    }
-
-    pub fn new(port: u16) -> RTPReceiver {
-        println!("RTPReceiver::new({})", port);
-        let socket = UdpSocket::bind(format!("0.0.0.0:{}", port)).unwrap();
-        RTPReceiver {
-            socket,
+        let mut header: Option<RTPHeader> = None;
+        let mut payload: Vec<u8> = Vec::new();
+        self.rtp_socket.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+        match self.rtp_socket.recv_from(&mut buffer) {
+            Ok((size, _)) => {
+                let header = self.parse_rtp_header(&buffer);
+                let payload = buffer[12..size].to_vec();
+                println!("RTP Header: {:02x?}", header);
+                println!("Payload size: {}", payload.len());
+                return Ok((header, payload));
+            }
+            Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut => {
+                Err(io::Error::new(io::ErrorKind::TimedOut, "recv timed out"))
+            }
+            Err(e) => panic!("recv error: {:?}", e),
         }
     }
+
+    pub fn new() -> RTPReceiver {
+        let rtp_socket = UdpSocket::bind("0.0.0.0:0").unwrap();
+        let port = rtp_socket.local_addr().unwrap().port();
+        let rtcp_socket = UdpSocket::bind(format!("0.0.0.0:{}", (port+1))).unwrap();
+        RTPReceiver {
+            rtp_socket,
+            rtcp_socket
+        }
+    }
+
+    pub fn get_rtp_port(&self) -> u16 {
+        return self.rtp_socket.local_addr().unwrap().port();
+    }
+    pub fn get_rtcp_port(&self) -> u16 {
+        return self.rtcp_socket.local_addr().unwrap().port();
+    }
+
 }

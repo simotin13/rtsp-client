@@ -8,6 +8,7 @@ use std::sync::Arc;
 use openh264::decoder::Decoder;
 use std::fs::OpenOptions;
 use std::io::Write;
+use crate::rtp::RTPHeader;
 
 extern crate ctrlc;
 
@@ -28,8 +29,13 @@ fn main() {
         }
     };
 
+    let rtp_receiver = rtp::RTPReceiver::new();
+    let rtp_port = rtp_receiver.get_rtp_port();
+    let rtcp_port = rtp_receiver.get_rtcp_port();
+    println!("rtp_port:{}, rtcp_port:{}", rtp_port, rtcp_port);
+
     let rtsp_url = &args[1];
-    let mut rtsp_client = match rtsp_client::RTSPClient::new(rtsp_url.to_string(), 56789) {
+    let mut rtsp_client = match rtsp_client::RTSPClient::new(rtsp_url.to_string(), rtp_port) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("failed to create RTSPClient: {}", e);
@@ -60,7 +66,6 @@ fn main() {
     rtsp_client.play().expect("failed to send PLAY request");
 
     // receive RTP
-    let rtp_receiver = rtp::RTPReceiver::new(rtsp_client.get_client_port());
     let mut payload_with_start_code : Vec<u8> = Vec::new();
     let mut fragment_buffer : Vec<u8> = Vec::new();
 
@@ -75,8 +80,23 @@ fn main() {
         println!("main loop running...");
 
         println!("before receive...");
-        let (header, payload) = rtp_receiver.receive();
-        println!("RTP Header: {:?}", header);
+        let mut payload: Vec<u8> = Vec::new();
+        let mut header: Option<RTPHeader> = None;
+        match rtp_receiver.receive() {
+            Ok((h, p)) => {
+                header = Some(h);
+                payload = p;
+                println!("RTP Header: {:?}", header);
+            }
+            Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut => {
+                println!("RTP receive timed out");
+                continue;
+            }
+            Err(e) => {
+                eprintln!("RTP receive error: {:?}", e);
+                continue
+            }
+        }
 
        file_mp4.write_all(&payload).expect("Failed to write to file");
 
