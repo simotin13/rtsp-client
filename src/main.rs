@@ -1,6 +1,8 @@
 mod rtsp_client;
 mod rtp;
 mod h264;
+use image::{RgbImage, Rgb};
+use chrono::Local;
 use std::process;
 use std::env;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -77,16 +79,13 @@ fn main() {
         .expect("Failed to open file");
 
     while running.load(Ordering::SeqCst) {
-        println!("main loop running...");
-
-        println!("before receive...");
         let mut payload: Vec<u8> = Vec::new();
         let mut header: Option<RTPHeader> = None;
         match rtp_receiver.receive() {
             Ok((h, p)) => {
                 header = Some(h);
                 payload = p;
-                println!("RTP Header: {:?}", header);
+                //println!("RTP Header: {:?}", header);
             }
             Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut => {
                 println!("RTP receive timed out");
@@ -111,20 +110,21 @@ fn main() {
 
         // 1: paylod has error, 0: payload is correct
         let nal_forbidden_bit = 0x01 & (nal_header >> 7);
-        println!("RTP NAL Forbidden Bit: {}", nal_forbidden_bit);
 
         // idc value means the importance of the NAL unit
         let nal_ref_idc = 0x03 & (nal_header >> 5);
-        println!("RTP NAL Ref IDC: {}", nal_ref_idc);
+        //println!("RTP NAL Ref IDC: {}", nal_ref_idc);
 
         let nal_unit_type = nal_header & 0x1F;
+        //println!("NAL Unit Type:{}", nal_unit_type);
+
         match nal_unit_type {
             0 => {
                 println!("RTP NAL Type Unspecified: {}", nal_unit_type);
                 continue;
             },
             rtp::NAL_UNIT_TYPE_NON_IDR => {
-                println!("RTP NAL Type Non IDR: {}", nal_unit_type);
+                //println!("RTP NAL Type Non IDR: {}", nal_unit_type);
             },
             rtp::NAL_UNIT_TYPE_PARTITION_A => {
                 println!("RTP NAL Type Partition A: {}", nal_unit_type);
@@ -136,11 +136,14 @@ fn main() {
                 println!("RTP NAL Type Partition C: {}", nal_unit_type);
             },
             rtp::NAL_UNIT_TYPE_IDR => {
-                println!("RTP NAL Type IDR: {}", nal_unit_type);
                 let idr = decoder.decode(&payload_with_start_code);
                 match idr {
-                    Ok(idr) => {
-                        // TODO
+                    Ok(Some(idr)) => {
+                        let (width, height) = idr.dimension_rgb();
+                        println!("Decoded IDR frame: {}x{}", width, height);
+                    },
+                    Ok(None) => {
+                        println!("Decoded but no frame available yet");
                     },
                     Err(e) => {
                         eprintln!("******** failed to decode: {}", e);
@@ -152,32 +155,14 @@ fn main() {
             rtp::NAL_UNIT_TYPE_SEI => {
                 println!("RTP NAL Type SEI: {}", nal_unit_type);
             },
-            rtp::NAL_UNIT_TYPE_SPS => {
-                println!("RTP NAL Type SPS: {}", nal_unit_type);
-                let sps = decoder.decode(&payload_with_start_code);
-                match sps {
-                    Ok(sps) => {
-                        println!("******** SPS: {:?}", sps);
-                    },
-                    Err(e) => {
-                        eprintln!("******** failed to decode: {}", e);
-                        // stop process
-                        break;
-                    }
-                }
+            rtp::NAL_UNIT_TYPE_SPS => {                             //  Sequence parameter set
+                // 7.3.2.1.1 Sequence parameter set data syntax
+                println!("******** RTP NAL Type SPS: {}", nal_unit_type);
+                h264::decode_sps(&payload);
             },
             rtp::NAL_UNIT_TYPE_PPS => {
                 println!("RTP NAL Type PPS: {}", nal_unit_type);
                 // decode PPS
-                let pps = decoder.decode(&payload_with_start_code);
-                match pps {
-                    Ok(pps) => {
-                        println!("******** PPS: {:?}", pps);
-                    },
-                    Err(e) => {
-                        eprintln!("******** failed to decode: {}", e);
-                    }
-                }
             },
             rtp::NAL_UNIT_TYPE_AUD => {
                 println!("RTP NAL Type AUD: {}", nal_unit_type);
@@ -199,29 +184,40 @@ fn main() {
             },
             28 => {
                 // without DON
-                println!("RTP NAL Type FU-A: {}", nal_unit_type);
+                //println!("RTP NAL Type FU-A: {}", nal_unit_type);
                 let fu_header = payload[1];
                 let start_bit = (fu_header >> 7) & 0x01;
                 let end_bit = (fu_header >> 6) & 0x01;
                 let reserved = (fu_header >> 5) & 0x01;
                 let fu_nal_unit_type = fu_header & 0x1F;
-                println!("RTP FU Start Bit: {}, End bit:{}, Reserved Bit:{}, FU nal_unit_type:{}", start_bit, end_bit, reserved, fu_nal_unit_type);
+                
+                //println!("RTP FU Start Bit: {}, End bit:{}, Reserved Bit:{}, FU nal_unit_type:{}", start_bit, end_bit, reserved, fu_nal_unit_type);
                 if start_bit == 1 {
                     fragment_buffer.clear();
                     // set start code for decode
                     fragment_buffer.push(0x00);
                     fragment_buffer.push(0x00);
                     fragment_buffer.push(0x01);
-                    let mut fu_nal_header = nal_header & 0xE0;
-                    fu_nal_header |= fu_nal_unit_type;
+                    let fu_nal_header = (nal_header & 0xE0) | fu_nal_unit_type;
                     fragment_buffer.push(fu_nal_header);
                 }
                 fragment_buffer.extend_from_slice(&payload[2..]);
                 if end_bit == 1 {
                     let yuv = decoder.decode(&fragment_buffer);
                     match yuv {
-                        Ok(yuv) => {
-                            // TODO
+                        Ok(Some(yuv)) => {
+                            let (width, height) = yuv.dimension_rgb();
+                            println!("Decoded IDR frame: {}x{}", width, height);
+                            let mut rgb_buffer = vec![0u8; width * height * 3];
+                            yuv.write_rgb8(&mut rgb_buffer);
+                            let img: RgbImage = RgbImage::from_raw(width as u32, height as u32, rgb_buffer).expect("Failed to create image buffer");
+
+                            let timestamp = Local::now().format("%Y%m%d_%H%M%S%3f").to_string();
+                            let filename = format!("frame_{}.png", timestamp);
+                            img.save(filename).expect("Failed to save PNG");
+                        },
+                        Ok(None) => {
+                            println!("Decoded but no frame available yet");
                         },
                         Err(e) => {
                             eprintln!("******** failed to decode: {}", e);
@@ -241,18 +237,6 @@ fn main() {
             },
             _ => {
                 println!("RTP NAL Type Unknown: {}", nal_unit_type);
-            }
-        }
-
-        if nal_unit_type == rtp::NAL_UNIT_TYPE_IDR {
-            let yuv = decoder.decode(&payload);
-            match yuv {
-                Ok(yuv) => {
-                    println!("YUV: {:?}", yuv);
-                },
-                Err(e) => {
-                    eprintln!("failed to decode: {}", e);
-                }
             }
         }
     }

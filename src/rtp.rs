@@ -73,8 +73,6 @@ impl RTPReceiver {
             Ok((size, _)) => {
                 let header = self.parse_rtp_header(&buffer);
                 let payload = buffer[12..size].to_vec();
-                println!("RTP Header: {:02x?}", header);
-                println!("Payload size: {}", payload.len());
                 return Ok((header, payload));
             }
             Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut => {
