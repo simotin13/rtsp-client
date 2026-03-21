@@ -24,15 +24,15 @@ struct NALUnit {
 
 #[derive(Debug)]
 pub struct RTPHeader {
-    version: u8,
-    padding: u8,
-    extension: u8,
-    csrc_count: u8,
-    marker: u8,
-    payload_type: u8,
-    sequence_number: u16,
-    timestamp: u32,
-    ssrc: u32,
+    pub version: u8,
+    pub padding: u8,
+    pub extension: u8,
+    pub csrc_count: u8,
+    pub marker: u8,
+    pub payload_type: u8,
+    pub sequence_number: u16,
+    pub timestamp: u32,
+    pub ssrc: u32,
 }
 
 pub struct RTPReceiver {
