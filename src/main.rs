@@ -159,10 +159,19 @@ fn main() {
                 // 7.3.2.1.1 Sequence parameter set data syntax
                 println!("******** RTP NAL Type SPS: {}", nal_unit_type);
                 h264::decode_sps(&payload);
+                let mut sps_with_start_code = vec![0x00, 0x00, 0x00, 0x01];
+                sps_with_start_code.extend_from_slice(&payload);
+                if let Err(e) = decoder.decode(&sps_with_start_code) {
+                    eprintln!("failed to feed SPS to decoder: {}", e);
+                }
             },
             rtp::NAL_UNIT_TYPE_PPS => {
                 println!("RTP NAL Type PPS: {}", nal_unit_type);
-                // decode PPS
+                let mut pps_with_start_code = vec![0x00, 0x00, 0x00, 0x01];
+                pps_with_start_code.extend_from_slice(&payload);
+                if let Err(e) = decoder.decode(&pps_with_start_code) {
+                    eprintln!("failed to feed PPS to decoder: {}", e);
+                }
             },
             rtp::NAL_UNIT_TYPE_AUD => {
                 println!("RTP NAL Type AUD: {}", nal_unit_type);
@@ -191,7 +200,7 @@ fn main() {
                 let reserved = (fu_header >> 5) & 0x01;
                 let fu_nal_unit_type = fu_header & 0x1F;
                 
-                //println!("RTP FU Start Bit: {}, End bit:{}, Reserved Bit:{}, FU nal_unit_type:{}", start_bit, end_bit, reserved, fu_nal_unit_type);
+                println!("RTP FU Start Bit: {}, End bit:{}, Reserved Bit:{}, FU nal_unit_type:{}", start_bit, end_bit, reserved, fu_nal_unit_type);
                 if start_bit == 1 {
                     fragment_buffer.clear();
                     // set start code for decode
@@ -214,7 +223,8 @@ fn main() {
 
                             let timestamp = Local::now().format("%Y%m%d_%H%M%S%3f").to_string();
                             let filename = format!("frame_{}.png", timestamp);
-                            img.save(filename).expect("Failed to save PNG");
+                            img.save(&filename).expect("Failed to save PNG");
+                            println!("**** Saved decoded frame as PNG: {}", filename);
                         },
                         Ok(None) => {
                             println!("Decoded but no frame available yet");
