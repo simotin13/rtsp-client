@@ -49,6 +49,102 @@ fn scaling_list(br: &mut BitReader, list: &mut [u8], size: usize, use_default_fl
     }
     // use_default_flag を必要に応じて更新
 }
+/// SPS NAL ユニット（NALヘッダバイト込み）から映像解像度を解析して返す。
+/// スタートコードは含まない生 NAL データを渡すこと。
+pub fn parse_sps_resolution(sps: &[u8]) -> Option<(u16, u16)> {
+    if sps.len() < 4 {
+        return None;
+    }
+    let mut br = BitReader::new(&sps[1..]); // sps[0] は NAL ヘッダ
+
+    let profile_idc = br.read_bits(8)?;
+    br.read_bits(8)?; // constraint flags + reserved
+    br.read_bits(8)?; // level_idc
+    br.read_ue()?;    // seq_parameter_set_id
+
+    let high_profiles: [u32; 13] = [100, 110, 122, 244, 44, 83, 86, 118, 128, 138, 139, 134, 135];
+    let mut chroma_format_idc = 1u32;
+
+    if high_profiles.contains(&profile_idc) {
+        chroma_format_idc = br.read_ue()?;
+        if chroma_format_idc == 3 {
+            br.read_bits(1)?; // separate_colour_plane_flag
+        }
+        br.read_ue()?; // bit_depth_luma_minus8
+        br.read_ue()?; // bit_depth_chroma_minus8
+        br.read_bits(1)?; // qpprime_y_zero_transform_bypass_flag
+        let scaling_present = br.read_bits(1)?;
+        if scaling_present == 1 {
+            let count = if chroma_format_idc != 3 { 8usize } else { 12 };
+            for i in 0..count {
+                let list_present = br.read_bits(1)?;
+                if list_present == 1 {
+                    let size = if i < 6 { 16usize } else { 64 };
+                    let mut last_scale = 8u32;
+                    let mut next_scale = 8u32;
+                    for _ in 0..size {
+                        if next_scale != 0 {
+                            let delta = br.read_se()?;
+                            next_scale = ((last_scale as i32 + delta + 256) % 256) as u32;
+                        }
+                        last_scale = if next_scale == 0 { last_scale } else { next_scale };
+                    }
+                }
+            }
+        }
+    }
+
+    br.read_ue()?; // log2_max_frame_num_minus4
+    let pic_order_cnt_type = br.read_ue()?;
+    if pic_order_cnt_type == 0 {
+        br.read_ue()?; // log2_max_pic_order_cnt_lsb_minus4
+    } else if pic_order_cnt_type == 1 {
+        br.read_bits(1)?; // delta_pic_order_always_zero_flag
+        br.read_se()?;    // offset_for_non_ref_pic
+        br.read_se()?;    // offset_for_top_to_bottom_field
+        let num = br.read_ue()?;
+        for _ in 0..num {
+            br.read_se()?;
+        }
+    }
+
+    br.read_ue()?;    // max_num_ref_frames
+    br.read_bits(1)?; // gaps_in_frame_num_value_allowed_flag
+
+    let width_in_mbs  = br.read_ue()? + 1;
+    let height_in_mbs = br.read_ue()? + 1;
+    let frame_mbs_only = br.read_bits(1)?;
+
+    if frame_mbs_only == 0 {
+        br.read_bits(1)?; // mb_adaptive_frame_field_flag
+    }
+
+    br.read_bits(1)?; // direct_8x8_inference_flag
+
+    let crop_flag = br.read_bits(1)?;
+    let (crop_l, crop_r, crop_t, crop_b) = if crop_flag == 1 {
+        (br.read_ue()?, br.read_ue()?, br.read_ue()?, br.read_ue()?)
+    } else {
+        (0, 0, 0, 0)
+    };
+
+    let (crop_unit_x, crop_unit_y) = match chroma_format_idc {
+        0 => (1u32, 2 - frame_mbs_only),
+        1 => (2,    2 * (2 - frame_mbs_only)),
+        2 => (2,    2 - frame_mbs_only),
+        3 => (1,    2 - frame_mbs_only),
+        _ => (1, 1),
+    };
+
+    let mut width  = width_in_mbs  * 16;
+    let mut height = height_in_mbs * 16;
+    if frame_mbs_only == 0 { height *= 2; }
+    width  -= (crop_l + crop_r) * crop_unit_x;
+    height -= (crop_t + crop_b) * crop_unit_y;
+
+    Some((width as u16, height as u16))
+}
+
 pub fn decode_sps(payload: &[u8]) {
     let mut br = BitReader::new(&payload[1..]);
      let profile_idc = br.read_bits(8).unwrap();
