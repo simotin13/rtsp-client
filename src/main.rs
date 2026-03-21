@@ -2,6 +2,7 @@ mod rtsp_client;
 mod rtp;
 mod h264;
 mod mp4_writer;
+mod player;
 
 use std::process;
 use std::env;
@@ -26,8 +27,19 @@ fn try_init_mp4(sps: &[u8], pps: &[u8]) -> Option<Mp4Writer> {
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
-        eprintln!("Usage: rtsp-client <rtsp url>");
+        eprintln!("Usage: rtsp-client <rtsp url>         # MP4録画");
+        eprintln!("       rtsp-client --play <rtsp url>  # ストリーム表示");
         std::process::exit(1);
+    }
+
+    // --play モード
+    if args[1] == "--play" {
+        if args.len() < 3 {
+            eprintln!("Usage: rtsp-client --play <rtsp url>");
+            std::process::exit(1);
+        }
+        player::run_player(args[2].clone());
+        return;
     }
 
     let rtp_receiver = rtp::RTPReceiver::new();
