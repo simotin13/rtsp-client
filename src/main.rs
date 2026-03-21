@@ -1,35 +1,34 @@
 mod rtsp_client;
 mod rtp;
 mod h264;
-use image::{RgbImage, Rgb};
-use chrono::Local;
+mod mp4_writer;
+
 use std::process;
 use std::env;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use openh264::decoder::Decoder;
-use std::fs::OpenOptions;
-use std::io::Write;
-use crate::rtp::RTPHeader;
+use std::fs::File;
+use mp4_writer::Mp4Writer;
 
 extern crate ctrlc;
+
+fn try_init_mp4(sps: &[u8], pps: &[u8]) -> Option<Mp4Writer> {
+    let (width, height) = h264::parse_sps_resolution(sps)?;
+    println!("Video resolution: {}x{}", width, height);
+    let file = File::create("output.mp4").ok()?;
+    let mut writer = Mp4Writer::new(file, width, height);
+    writer.write_header().ok()?;
+    writer.set_sps_pps(sps.to_vec(), pps.to_vec());
+    println!("MP4 recording started -> output.mp4");
+    Some(writer)
+}
 
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
-        eprintln!("Usage. rtsp-client <rtsp url>");
+        eprintln!("Usage: rtsp-client <rtsp url>");
         std::process::exit(1);
     }
-
-    // openh264 decoder
-    let api = openh264::OpenH264API::from_source();
-    let mut decoder = match Decoder::new(api) {
-        Ok(d) => d,
-        Err(e) => {
-            eprintln!("failed to create decoder: {}", e);
-            process::exit(1);
-        }
-    };
 
     let rtp_receiver = rtp::RTPReceiver::new();
     let rtp_port = rtp_receiver.get_rtp_port();
@@ -48,211 +47,164 @@ fn main() {
     let running = Arc::new(AtomicBool::new(true));
     let r = running.clone();
     ctrlc::set_handler(move || {
-        println!("stop requested...");
+        println!("\nCtrl+C received, stopping...");
         r.store(false, Ordering::SeqCst);
     }).expect("Error setting Ctrl+C handler");
 
-    // OPTIONS
     rtsp_client.options().expect("failed to send OPTIONS request");
-
-    // DESCRIBE
     rtsp_client.describe().expect("failed to send DESCRIBE request");
-
-    // SETUP track1
     rtsp_client.setup_track1().expect("failed to send SETUP request for track1");
-
-    // SETUP track2
     rtsp_client.setup_track2().expect("failed to send SETUP request for track2");
-
-    // PLAY
     rtsp_client.play().expect("failed to send PLAY request");
 
-    // receive RTP
-    let mut payload_with_start_code : Vec<u8> = Vec::new();
-    let mut fragment_buffer : Vec<u8> = Vec::new();
+    // 録画状態
+    let mut sps_nal: Option<Vec<u8>> = None;
+    let mut pps_nal: Option<Vec<u8>> = None;
+    let mut mp4: Option<Mp4Writer> = None;
 
-    let file_path = "sample.mp4";
-    let mut file_mp4 = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(file_path)
-        .expect("Failed to open file");
+    // FU-A 組み立てバッファ（デコーダ用: スタートコードあり、MP4用: なし）
+    let mut fragment_dec_buf: Vec<u8> = Vec::new();
+    let mut fragment_mp4_buf: Vec<u8> = Vec::new();
+    let mut fragment_dts: u32 = 0;
+    let mut fragment_is_keyframe: bool = false;
 
     while running.load(Ordering::SeqCst) {
-        let mut payload: Vec<u8> = Vec::new();
-        let mut header: Option<RTPHeader> = None;
-        match rtp_receiver.receive() {
-            Ok((h, p)) => {
-                header = Some(h);
-                payload = p;
-                //println!("RTP Header: {:?}", header);
-            }
+        let (header, payload) = match rtp_receiver.receive() {
+            Ok((h, p)) => (h, p),
             Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut => {
-                println!("RTP receive timed out");
                 continue;
             }
             Err(e) => {
                 eprintln!("RTP receive error: {:?}", e);
-                continue
+                continue;
             }
+        };
+
+        if payload.is_empty() {
+            continue;
         }
 
-       file_mp4.write_all(&payload).expect("Failed to write to file");
-
-        // make payload with start code for openH264 decoder
-        payload_with_start_code.push(0x00);
-        payload_with_start_code.push(0x00);
-        payload_with_start_code.push(0x01);
-        payload_with_start_code.extend(payload.clone());
-
-        // check NAL header
+        let rtp_ts = header.timestamp;
         let nal_header = payload[0];
-
-        // 1: paylod has error, 0: payload is correct
-        let nal_forbidden_bit = 0x01 & (nal_header >> 7);
-
-        // idc value means the importance of the NAL unit
-        let nal_ref_idc = 0x03 & (nal_header >> 5);
-        //println!("RTP NAL Ref IDC: {}", nal_ref_idc);
-
         let nal_unit_type = nal_header & 0x1F;
-        //println!("NAL Unit Type:{}", nal_unit_type);
 
         match nal_unit_type {
             0 => {
-                println!("RTP NAL Type Unspecified: {}", nal_unit_type);
-                continue;
+                // Unspecified
             },
             rtp::NAL_UNIT_TYPE_NON_IDR => {
-                //println!("RTP NAL Type Non IDR: {}", nal_unit_type);
-            },
-            rtp::NAL_UNIT_TYPE_PARTITION_A => {
-                println!("RTP NAL Type Partition A: {}", nal_unit_type);
-            },
-            rtp::NAL_UNIT_TYPE_PARTITION_B => {
-                println!("RTP NAL Type Partition B: {}", nal_unit_type);
-            },
-            rtp::NAL_UNIT_TYPE_PARTITION_C => {
-                println!("RTP NAL Type Partition C: {}", nal_unit_type);
+                if let Some(ref mut writer) = mp4 {
+                    if let Err(e) = writer.write_sample(&payload, rtp_ts, false) {
+                        eprintln!("mp4 write_sample error: {}", e);
+                    }
+                }
             },
             rtp::NAL_UNIT_TYPE_IDR => {
-                let idr = decoder.decode(&payload_with_start_code);
-                match idr {
-                    Ok(Some(idr)) => {
-                        let (width, height) = idr.dimension_rgb();
-                        println!("Decoded IDR frame: {}x{}", width, height);
-                    },
-                    Ok(None) => {
-                        println!("Decoded but no frame available yet");
-                    },
-                    Err(e) => {
-                        eprintln!("******** failed to decode: {}", e);
-                        // stop process
-                        break;
+                if let Some(ref mut writer) = mp4 {
+                    if let Err(e) = writer.write_sample(&payload, rtp_ts, true) {
+                        eprintln!("mp4 write_sample error: {}", e);
                     }
                 }
             },
             rtp::NAL_UNIT_TYPE_SEI => {
-                println!("RTP NAL Type SEI: {}", nal_unit_type);
+                // SEI は MP4 に書かない
             },
-            rtp::NAL_UNIT_TYPE_SPS => {                             //  Sequence parameter set
-                // 7.3.2.1.1 Sequence parameter set data syntax
-                println!("******** RTP NAL Type SPS: {}", nal_unit_type);
+            rtp::NAL_UNIT_TYPE_SPS => {
+                println!("SPS received");
                 h264::decode_sps(&payload);
-                let mut sps_with_start_code = vec![0x00, 0x00, 0x00, 0x01];
-                sps_with_start_code.extend_from_slice(&payload);
-                if let Err(e) = decoder.decode(&sps_with_start_code) {
-                    eprintln!("failed to feed SPS to decoder: {}", e);
+                sps_nal = Some(payload.clone());
+                if mp4.is_none() {
+                    if let (Some(sps), Some(pps)) = (&sps_nal, &pps_nal) {
+                        mp4 = try_init_mp4(sps, pps);
+                    }
                 }
             },
             rtp::NAL_UNIT_TYPE_PPS => {
-                println!("RTP NAL Type PPS: {}", nal_unit_type);
-                let mut pps_with_start_code = vec![0x00, 0x00, 0x00, 0x01];
-                pps_with_start_code.extend_from_slice(&payload);
-                if let Err(e) = decoder.decode(&pps_with_start_code) {
-                    eprintln!("failed to feed PPS to decoder: {}", e);
+                println!("PPS received");
+                pps_nal = Some(payload.clone());
+                if mp4.is_none() {
+                    if let (Some(sps), Some(pps)) = (&sps_nal, &pps_nal) {
+                        mp4 = try_init_mp4(sps, pps);
+                    }
                 }
             },
-            rtp::NAL_UNIT_TYPE_AUD => {
-                println!("RTP NAL Type AUD: {}", nal_unit_type);
-            },
+            rtp::NAL_UNIT_TYPE_AUD => {},
             rtp::NAL_UNIT_TYPE_END_OF_SEQUENCE => {
-                println!("RTP NAL Type End of Sequence: {}", nal_unit_type);
+                println!("End of Sequence");
             },
             rtp::NAL_UNIT_TYPE_END_OF_STREAM => {
-                println!("RTP NAL Type End of Stream: {}", nal_unit_type);
+                println!("End of Stream");
+                break;
             },
-            rtp::NAL_UNIT_TYPE_FILLER_DATA => {
-                println!("RTP NAL Type Filler Data: {}", nal_unit_type);
-            },
-            rtp::NAL_UNIT_TYPE_SPS_EXT => {
-                println!("RTP NAL Type SPS Ext: {}", nal_unit_type);
+            rtp::NAL_UNIT_TYPE_FILLER_DATA => {},
+            rtp::NAL_UNIT_TYPE_SPS_EXT => {},
+            rtp::NAL_UNIT_TYPE_PARTITION_A |
+            rtp::NAL_UNIT_TYPE_PARTITION_B |
+            rtp::NAL_UNIT_TYPE_PARTITION_C => {
+                println!("Partition packet (type {})", nal_unit_type);
             },
             24..=27 => {
-                println!("RTP NAL Type Aggregation Packet: {}", nal_unit_type);
+                println!("Aggregation packet (type {})", nal_unit_type);
             },
             28 => {
-                // without DON
-                //println!("RTP NAL Type FU-A: {}", nal_unit_type);
-                let fu_header = payload[1];
-                let start_bit = (fu_header >> 7) & 0x01;
-                let end_bit = (fu_header >> 6) & 0x01;
-                let reserved = (fu_header >> 5) & 0x01;
-                let fu_nal_unit_type = fu_header & 0x1F;
-                
-                println!("RTP FU Start Bit: {}, End bit:{}, Reserved Bit:{}, FU nal_unit_type:{}", start_bit, end_bit, reserved, fu_nal_unit_type);
-                if start_bit == 1 {
-                    fragment_buffer.clear();
-                    // set start code for decode
-                    fragment_buffer.push(0x00);
-                    fragment_buffer.push(0x00);
-                    fragment_buffer.push(0x01);
-                    let fu_nal_header = (nal_header & 0xE0) | fu_nal_unit_type;
-                    fragment_buffer.push(fu_nal_header);
+                // FU-A (fragmentation unit without DON)
+                if payload.len() < 2 {
+                    continue;
                 }
-                fragment_buffer.extend_from_slice(&payload[2..]);
-                if end_bit == 1 {
-                    let yuv = decoder.decode(&fragment_buffer);
-                    match yuv {
-                        Ok(Some(yuv)) => {
-                            let (width, height) = yuv.dimension_rgb();
-                            println!("Decoded IDR frame: {}x{}", width, height);
-                            let mut rgb_buffer = vec![0u8; width * height * 3];
-                            yuv.write_rgb8(&mut rgb_buffer);
-                            let img: RgbImage = RgbImage::from_raw(width as u32, height as u32, rgb_buffer).expect("Failed to create image buffer");
+                let fu_header = payload[1];
+                let start_bit      = (fu_header >> 7) & 0x01;
+                let end_bit        = (fu_header >> 6) & 0x01;
+                let fu_nal_unit_type = fu_header & 0x1F;
+                let fu_nal_header   = (nal_header & 0xE0) | fu_nal_unit_type;
 
-                            let timestamp = Local::now().format("%Y%m%d_%H%M%S%3f").to_string();
-                            let filename = format!("frame_{}.png", timestamp);
-                            img.save(&filename).expect("Failed to save PNG");
-                            println!("**** Saved decoded frame as PNG: {}", filename);
-                        },
-                        Ok(None) => {
-                            println!("Decoded but no frame available yet");
-                        },
-                        Err(e) => {
-                            eprintln!("******** failed to decode: {}", e);
+                if start_bit == 1 {
+                    // デコーダ用（スタートコードあり）
+                    fragment_dec_buf.clear();
+                    fragment_dec_buf.extend_from_slice(&[0x00, 0x00, 0x01, fu_nal_header]);
+                    // MP4 用（スタートコードなし）
+                    fragment_mp4_buf.clear();
+                    fragment_mp4_buf.push(fu_nal_header);
+
+                    fragment_dts = rtp_ts;
+                    fragment_is_keyframe = fu_nal_unit_type == rtp::NAL_UNIT_TYPE_IDR;
+                }
+
+                fragment_dec_buf.extend_from_slice(&payload[2..]);
+                fragment_mp4_buf.extend_from_slice(&payload[2..]);
+
+                if end_bit == 1 {
+                    if let Some(ref mut writer) = mp4 {
+                        if let Err(e) = writer.write_sample(&fragment_mp4_buf, fragment_dts, fragment_is_keyframe) {
+                            eprintln!("mp4 write_sample error: {}", e);
                         }
                     }
                 }
             },
             29 => {
-                // with DON
-                println!("RTP NAL Type FU-B: {}", nal_unit_type);
-                let fu_header = payload[1];
-                let start_bit = (fu_header >> 7) & 0x01;
-                let end_bit = (fu_header >> 6) & 0x01;
-                let reserved = (fu_header >> 5) & 0x01;
-                let fu_nal_unit_type = fu_header & 0x1F;
-                println!("RTP FU Start Bit: {}, End bit:{}, Reserved Bit:{}, FU nal_unit_type:{}", start_bit, end_bit, reserved, fu_nal_unit_type);
+                // FU-B (with DON) - 未対応
+                println!("FU-B (type 29) not supported");
             },
             _ => {
-                println!("RTP NAL Type Unknown: {}", nal_unit_type);
+                println!("Unknown NAL type: {}", nal_unit_type);
             }
         }
     }
 
-    drop(file_mp4);
+    // MP4 ファイルを確定して書き出す
+    if let Some(ref mut writer) = mp4 {
+        let count = writer.sample_count();
+        if count > 0 {
+            match writer.finalize() {
+                Ok(_) => println!("output.mp4 saved ({} samples)", count),
+                Err(e) => eprintln!("Failed to finalize MP4: {}", e),
+            }
+        } else {
+            println!("No samples recorded, output.mp4 not finalized.");
+        }
+    } else {
+        println!("Recording was not started (no SPS/PPS received).");
+    }
 
-    println!("stop receiving...");
+    println!("Shutting down...");
     rtsp_client.shutdown();
 }
