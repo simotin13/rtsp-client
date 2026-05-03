@@ -24,6 +24,7 @@ pub struct RTSPClient {
     tracks: Vec<Track>,
 }
 
+#[derive(Clone)]
 struct Track {
     media: String,
     port: u16,
@@ -273,6 +274,19 @@ impl RTSPClient {
             }
         }
 
+        Ok(())
+    }
+
+    pub fn setup_tracks(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        let tracks = self.tracks.clone();
+
+        for track in tracks {
+            if track.media == "video" {
+                self.setup_track1()?;
+            } else if track.media == "audio" {
+                self.setup_track2()?;
+            }
+        }
         Ok(())
     }
 

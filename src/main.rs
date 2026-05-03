@@ -65,8 +65,7 @@ fn main() {
 
     rtsp_client.options().expect("failed to send OPTIONS request");
     rtsp_client.describe().expect("failed to send DESCRIBE request");
-    rtsp_client.setup_track1().expect("failed to send SETUP request for track1");
-    rtsp_client.setup_track2().expect("failed to send SETUP request for track2");
+    rtsp_client.setup_tracks().expect("failed to send SETUP request for tracks");
     rtsp_client.play().expect("failed to send PLAY request");
 
     // 録画状態
