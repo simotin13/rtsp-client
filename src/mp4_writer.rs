@@ -115,6 +115,7 @@ impl Mp4Writer {
     /// * `dts`        - RTPタイムスタンプ（90kHz基準）
     /// * `is_keyframe`- IDRフレームなら true
     pub fn write_sample(&mut self, nal: &[u8], dts: u32, is_keyframe: bool) -> io::Result<()> {
+        println!("@@@@ write_sample sample_count={}", self.samples.len());
         let offset = self.writer.stream_position()?;
         let nal_size = nal.len() as u32;
 

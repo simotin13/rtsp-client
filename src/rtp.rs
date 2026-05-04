@@ -1,6 +1,7 @@
 use std::net::{UdpSocket};
 use std::time::Duration;
 use std::io;
+pub const NAL_UNIT_TYPE_UNSPECIFIED: u8 = 0;
 pub const NAL_UNIT_TYPE_NON_IDR: u8 = 1;
 pub const NAL_UNIT_TYPE_PARTITION_A: u8 = 2;
 pub const NAL_UNIT_TYPE_PARTITION_B: u8 = 3;
@@ -15,14 +16,10 @@ pub const NAL_UNIT_TYPE_END_OF_STREAM: u8 = 11;
 pub const NAL_UNIT_TYPE_FILLER_DATA: u8 = 12;
 pub const NAL_UNIT_TYPE_SPS_EXT: u8 = 13;
 pub const NAL_UNIT_TYPE_STAP_A: u8 = 24;
-
-
-/*
-struct NALUnit {
-    nal_header: u8,
-    rbsp: Vec<u8>,
-}
-*/
+pub const NAL_UNIT_TYPE_STAP_B: u8 = 25;
+pub const NAL_UNIT_TYPE_MTAP16: u8 = 26;
+pub const NAL_UNIT_TYPE_MTAP24: u8 = 27;
+pub const NAL_UNIT_TYPE_FU_B: u8 = 29;
 
 #[derive(Debug)]
 pub struct RTPHeader {

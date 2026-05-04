@@ -49,6 +49,7 @@ fn scaling_list(br: &mut BitReader, list: &mut [u8], size: usize, use_default_fl
     }
     // use_default_flag を必要に応じて更新
 }
+
 /// SPS NAL ユニット（NALヘッダバイト込み）から映像解像度を解析して返す。
 /// スタートコードは含まない生 NAL データを渡すこと。
 pub fn parse_sps_resolution(sps: &[u8]) -> Option<(u16, u16)> {
