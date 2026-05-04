@@ -154,7 +154,28 @@ fn main() {
             rtp::NAL_UNIT_TYPE_PARTITION_C => {
                 println!("Partition packet (type {})", nal_unit_type);
             },
-            24..=27 => {
+            rtp::NAL_UNIT_TYPE_STAP_A => {
+                println!("Aggregation packet (type {})", nal_unit_type);
+                // STAP-A (Single-Time Aggregation Packet)
+
+                if payload.len() < 2 {
+                    eprintln!("Invalid STAP-A packet");
+                    continue;
+                }
+
+                // NALU Size (2 bytes)
+                let nalu_size = u16::from_be_bytes([payload[1], payload[2]]) as usize;
+                if payload.len() < 2 + nalu_size {
+                    eprintln!("Invalid STAP-A packet: NALU size exceeds payload");
+                    continue;
+                }
+
+                // NALU Header (1 byte)
+                let stap_a_nal_header = payload[3];
+                let stap_a_nal_unit_type = stap_a_nal_header & 0x1F;
+                println!("@@@@ NALU Size: {}, NALU Type: {}", nalu_size, stap_a_nal_unit_type);
+            },
+            25..=27 => {
                 println!("Aggregation packet (type {})", nal_unit_type);
             },
             28 => {

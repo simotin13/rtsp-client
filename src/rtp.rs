@@ -14,6 +14,8 @@ pub const NAL_UNIT_TYPE_END_OF_SEQUENCE: u8 = 10;
 pub const NAL_UNIT_TYPE_END_OF_STREAM: u8 = 11;
 pub const NAL_UNIT_TYPE_FILLER_DATA: u8 = 12;
 pub const NAL_UNIT_TYPE_SPS_EXT: u8 = 13;
+pub const NAL_UNIT_TYPE_STAP_A: u8 = 24;
+
 
 /*
 struct NALUnit {
