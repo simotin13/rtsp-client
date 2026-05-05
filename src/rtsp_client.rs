@@ -475,6 +475,31 @@ impl RTSPClient {
         self.stream.shutdown(std::net::Shutdown::Both).unwrap();
     }
 
+    /// SDP の fmtp 属性から sprop-parameter-sets を取得して (SPS, PPS) を返す。
+    /// スタートコードなし・NALヘッダ込みの生バイト列。
+    pub fn get_video_sprop_parameter_sets(&self) -> Option<(Vec<u8>, Vec<u8>)> {
+        let video_track = self.tracks.iter().find(|t| t.media == "video")?;
+        for (key, value) in &video_track.attributes {
+            if key != "fmtp" {
+                continue;
+            }
+            // value 例: "96 packetization-mode=1;sprop-parameter-sets=BASE64SPS,BASE64PPS"
+            for param in value.split(';') {
+                let param = param.trim();
+                if let Some(sprop) = param.strip_prefix("sprop-parameter-sets=") {
+                    let mut parts = sprop.splitn(2, ',');
+                    let sps_b64 = parts.next()?.trim();
+                    let pps_b64 = parts.next()?.trim();
+                    let sps = base64::decode(sps_b64).ok()?;
+                    let pps = base64::decode(pps_b64).ok()?;
+                    println!("sprop-parameter-sets: SPS={} bytes, PPS={} bytes", sps.len(), pps.len());
+                    return Some((sps, pps));
+                }
+            }
+        }
+        None
+    }
+
     pub fn get_host(&self) -> String {
         self.host.clone()
     }

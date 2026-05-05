@@ -33,29 +33,41 @@ impl H264Recorder {
     pub fn handle_event(&mut self, ev: NalEvent) {
         match ev {
             NalEvent::Sps(sps) => {
-                println!("@@@@@@@@@@@@ Received SPS");
                 self.sps = Some(sps.to_vec());
-                if let (Some(ref sps), Some(ref pps)) = (&self.sps, &self.pps) {
-                    if self.mp4.is_none() {
-                        self.mp4 = Self::try_init(sps, pps);
+                if self.mp4.is_some() {
+                    // mp4 初期化済み: avcC 用 SPS を最新の in-band SPS に更新
+                    if let Some(ref pps) = self.pps {
+                        let pps = pps.clone();
+                        if let Some(ref mut writer) = self.mp4 {
+                            writer.set_sps_pps(sps.to_vec(), pps);
+                        }
                     }
+                } else if let (Some(ref s), Some(ref p)) = (&self.sps, &self.pps) {
+                    self.mp4 = Self::try_init(s, p);
                 }
             }
 
             NalEvent::Pps(pps) => {
-                println!("@@@@@@@@@@@@ Received PPS");
                 self.pps = Some(pps.to_vec());
-                if let (Some(ref sps), Some(ref pps)) = (&self.sps, &self.pps) {
-                    if self.mp4.is_none() {
-                        self.mp4 = Self::try_init(sps, pps);
+                if self.mp4.is_some() {
+                    // mp4 初期化済み: avcC 用 PPS を最新の in-band PPS に更新
+                    if let Some(ref sps) = self.sps {
+                        let sps = sps.clone();
+                        if let Some(ref mut writer) = self.mp4 {
+                            writer.set_sps_pps(sps, pps.to_vec());
+                        }
                     }
+                } else if let (Some(ref s), Some(ref p)) = (&self.sps, &self.pps) {
+                    self.mp4 = Self::try_init(s, p);
                 }
             }
 
             NalEvent::Video { data, ts, is_key } => {
                 if let Some(ref mut writer) = self.mp4 {
-                    println!("*********** Writing video sample: ts={}, is_key={}", ts, is_key);
-                    let _ = writer.write_sample(data, ts, is_key);
+                    // IDRが来るまでは書き込まない（最初の数フレームが灰色になるのを防ぐため）
+                    if is_key || writer.sample_count() > 0 {
+                        let _ = writer.write_sample(data, ts, is_key);
+                    }
                 }
             }
 

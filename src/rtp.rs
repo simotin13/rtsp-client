@@ -65,15 +65,27 @@ impl RTPReceiver {
     }
 
     pub fn receive(&self) -> Result<(RTPHeader, Vec<u8>), io::Error> {
-        let mut buffer = [0; 1500];
-        let mut header: Option<RTPHeader> = None;
-        let mut payload: Vec<u8> = Vec::new();
+        let mut buffer = [0u8; 65535];
         self.rtp_socket.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
         match self.rtp_socket.recv_from(&mut buffer) {
             Ok((size, _)) => {
                 let header = self.parse_rtp_header(&buffer);
-                let payload = buffer[12..size].to_vec();
-                return Ok((header, payload));
+
+                // CSRC リストをスキップ（各 4 バイト × csrc_count）
+                let mut offset = 12 + 4 * header.csrc_count as usize;
+
+                // Extension ヘッダをスキップ（profile 2B + length 2B + length*4 バイト）
+                if header.extension == 1 && offset + 4 <= size {
+                    let ext_len = u16::from_be_bytes([buffer[offset + 2], buffer[offset + 3]]) as usize;
+                    offset += 4 + ext_len * 4;
+                }
+
+                let payload = if offset <= size {
+                    buffer[offset..size].to_vec()
+                } else {
+                    Vec::new()
+                };
+                Ok((header, payload))
             }
             Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut => {
                 Err(io::Error::new(io::ErrorKind::TimedOut, "recv timed out"))

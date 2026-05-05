@@ -108,24 +108,24 @@ impl Mp4Writer {
         Ok(())
     }
 
-    /// 1フレーム分のNALユニットを書き込む。
+    /// 1アクセスユニット（フレーム）を書き込む。
     ///
     /// # 引数
-    /// * `nal`        - スタートコードなしの生NALデータ
+    /// * `data`       - AVCC 形式のアクセスユニット: ([4バイト長][NALデータ])+ の連結
     /// * `dts`        - RTPタイムスタンプ（90kHz基準）
-    /// * `is_keyframe`- IDRフレームなら true
-    pub fn write_sample(&mut self, nal: &[u8], dts: u32, is_keyframe: bool) -> io::Result<()> {
-        println!("@@@@ write_sample sample_count={}", self.samples.len());
+    /// * `is_keyframe`- IDRスライスを含むなら true
+    pub fn write_sample(&mut self, data: &[u8], dts: u32, is_keyframe: bool) -> io::Result<()> {
+        if data.is_empty() {
+            return Ok(());
+        }
         let offset = self.writer.stream_position()?;
-        let nal_size = nal.len() as u32;
 
-        // length-prefix（4バイトBE）＋NALデータ
-        self.writer.write_all(&nal_size.to_be_bytes())?;
-        self.writer.write_all(nal)?;
+        // data は ([4バイト長][NALデータ])+ の形式でそのまま書き込む
+        self.writer.write_all(data)?;
 
         self.samples.push(SampleInfo {
             offset,
-            size: nal_size + 4,
+            size: data.len() as u32,
             dts,
             is_keyframe,
         });
