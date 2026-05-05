@@ -214,6 +214,54 @@ fn main() {
                     }
                 }
             }
+            rtp::NAL_UNIT_TYPE_STAP_B => {
+                println!("Received STAP-B NAL unit, which is not supported in this implementation");
+            }
+            rtp::NAL_UNIT_TYPE_MTAP16 => {
+                println!("Received MTAP16 NAL unit, which is not supported in this implementation");
+            }
+            rtp::NAL_UNIT_TYPE_MTAP24 => {
+                println!("Received MTAP24 NAL unit, which is not supported in this implementation");
+            }
+            rtp::NAL_UNIT_TYPE_FU_A => {
+                // FU-A (fragmentation unit without DON)
+                println!("@@@@ Received FU-A NAL unit");
+                if payload.len() < 2 {
+                    continue;
+                }
+                let fu_header = payload[1];
+                let start_bit      = (fu_header >> 7) & 0x01;
+                let end_bit        = (fu_header >> 6) & 0x01;
+                let fu_nal_unit_type = fu_header & 0x1F;
+                let fu_nal_header   = (nal_header & 0xE0) | fu_nal_unit_type;
+
+                if start_bit == 1 {
+                    // デコーダ用（スタートコードあり）
+                    fragment_dec_buf.clear();
+                    fragment_dec_buf.extend_from_slice(&[0x00, 0x00, 0x01, fu_nal_header]);
+                    // MP4 用（スタートコードなし）
+                    fragment_mp4_buf.clear();
+                    fragment_mp4_buf.push(fu_nal_header);
+
+                    fragment_dts = rtp_ts;
+                    fragment_is_keyframe = fu_nal_unit_type == rtp::NAL_UNIT_TYPE_IDR;
+                }
+
+                fragment_dec_buf.extend_from_slice(&payload[2..]);
+                fragment_mp4_buf.extend_from_slice(&payload[2..]);
+
+                if end_bit == 1 {
+                    recorder.handle_event(NalEvent::Video {
+                        data: &fragment_mp4_buf,
+                        ts: fragment_dts,
+                        is_key: fragment_is_keyframe,
+                    });
+                }
+            }
+
+            rtp::NAL_UNIT_TYPE_FU_B => {
+                println!("Received FU-B NAL unit, which is not supported in this implementation");
+            }
             _ => {
                 if let Some(ev) = parse_single_nalu(nal_unit_type, &payload, rtp_ts) {
                     recorder.handle_event(ev);

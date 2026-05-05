@@ -19,6 +19,7 @@ pub const NAL_UNIT_TYPE_STAP_A: u8 = 24;
 pub const NAL_UNIT_TYPE_STAP_B: u8 = 25;
 pub const NAL_UNIT_TYPE_MTAP16: u8 = 26;
 pub const NAL_UNIT_TYPE_MTAP24: u8 = 27;
+pub const NAL_UNIT_TYPE_FU_A: u8 = 28;
 pub const NAL_UNIT_TYPE_FU_B: u8 = 29;
 
 #[derive(Debug)]
